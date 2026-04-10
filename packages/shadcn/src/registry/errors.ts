@@ -1,3 +1,4 @@
+import { SHADCN_URL } from "@/src/registry/constants"
 import { z } from "zod"
 
 // Error codes for programmatic error handling
@@ -5,6 +6,7 @@ export const RegistryErrorCode = {
   // Network errors
   NETWORK_ERROR: "NETWORK_ERROR",
   NOT_FOUND: "NOT_FOUND",
+  GONE: "GONE",
   UNAUTHORIZED: "UNAUTHORIZED",
   FORBIDDEN: "FORBIDDEN",
   FETCH_ERROR: "FETCH_ERROR",
@@ -75,7 +77,10 @@ export class RegistryError extends Error {
 }
 
 export class RegistryNotFoundError extends RegistryError {
-  constructor(public readonly url: string, cause?: unknown) {
+  constructor(
+    public readonly url: string,
+    cause?: unknown
+  ) {
     const message = `The item at ${url} was not found. It may not exist at the registry.`
 
     super(message, {
@@ -90,8 +95,30 @@ export class RegistryNotFoundError extends RegistryError {
   }
 }
 
+export class RegistryGoneError extends RegistryError {
+  constructor(
+    public readonly url: string,
+    cause?: unknown
+  ) {
+    const message = `The item at ${url} is no longer available. It may have been removed or expired.`
+
+    super(message, {
+      code: RegistryErrorCode.GONE,
+      statusCode: 410,
+      cause,
+      context: { url },
+      suggestion:
+        "This resource was previously available but has been permanently removed. Check if a newer version exists or contact the registry maintainer.",
+    })
+    this.name = "RegistryGoneError"
+  }
+}
+
 export class RegistryUnauthorizedError extends RegistryError {
-  constructor(public readonly url: string, cause?: unknown) {
+  constructor(
+    public readonly url: string,
+    cause?: unknown
+  ) {
     const message = `You are not authorized to access the item at ${url}. If this is a remote registry, you may need to authenticate.`
 
     super(message, {
@@ -107,7 +134,10 @@ export class RegistryUnauthorizedError extends RegistryError {
 }
 
 export class RegistryForbiddenError extends RegistryError {
-  constructor(public readonly url: string, cause?: unknown) {
+  constructor(
+    public readonly url: string,
+    cause?: unknown
+  ) {
     const message = `You are not authorized to access the item at ${url}. If this is a remote registry, you may need to authenticate.`
 
     super(message, {
@@ -182,7 +212,10 @@ export class RegistryNotConfiguredError extends RegistryError {
 }
 
 export class RegistryLocalFileError extends RegistryError {
-  constructor(public readonly filePath: string, cause?: unknown) {
+  constructor(
+    public readonly filePath: string,
+    cause?: unknown
+  ) {
     super(`Failed to read local registry file: ${filePath}`, {
       code: RegistryErrorCode.LOCAL_FILE_ERROR,
       cause,
@@ -196,7 +229,10 @@ export class RegistryLocalFileError extends RegistryError {
 export class RegistryParseError extends RegistryError {
   public readonly parseError: unknown
 
-  constructor(public readonly item: string, parseError: unknown) {
+  constructor(
+    public readonly item: string,
+    parseError: unknown
+  ) {
     let message = `Failed to parse registry item: ${item}`
 
     if (parseError instanceof z.ZodError) {
@@ -209,8 +245,7 @@ export class RegistryParseError extends RegistryError {
       code: RegistryErrorCode.PARSE_ERROR,
       cause: parseError,
       context: { item },
-      suggestion:
-        "The registry item may be corrupted or have an invalid format. Please make sure it returns a valid JSON object. See https://ui.shadcn.com/schema/registry-item.json.",
+      suggestion: `The registry item may be corrupted or have an invalid format. Please make sure it returns a valid JSON object. See ${SHADCN_URL}/schema/registry-item.json.`,
     })
 
     this.parseError = parseError
@@ -266,7 +301,10 @@ export class ConfigMissingError extends RegistryError {
 }
 
 export class ConfigParseError extends RegistryError {
-  constructor(public readonly cwd: string, parseError: unknown) {
+  constructor(
+    public readonly cwd: string,
+    parseError: unknown
+  ) {
     let message = `Invalid components.json configuration in ${cwd}.`
 
     if (parseError instanceof z.ZodError) {
@@ -283,5 +321,63 @@ export class ConfigParseError extends RegistryError {
         "Check your components.json file for syntax errors or invalid configuration. Run 'npx shadcn@latest init' to regenerate a valid configuration.",
     })
     this.name = "ConfigParseError"
+  }
+}
+
+export class RegistriesIndexParseError extends RegistryError {
+  public readonly parseError: unknown
+
+  constructor(parseError: unknown) {
+    let message = "Failed to parse registries index"
+
+    if (parseError instanceof z.ZodError) {
+      const invalidNamespaces = parseError.errors
+        .filter((e) => e.path.length > 0)
+        .map((e) => `"${e.path[0]}"`)
+        .filter((v, i, arr) => arr.indexOf(v) === i) // remove duplicates
+
+      if (invalidNamespaces.length > 0) {
+        message = `Failed to parse registries index. Invalid registry namespace(s): ${invalidNamespaces.join(
+          ", "
+        )}\n${parseError.errors
+          .map((e) => `  - ${e.path.join(".")}: ${e.message}`)
+          .join("\n")}`
+      } else {
+        message = `Failed to parse registries index:\n${parseError.errors
+          .map((e) => `  - ${e.path.join(".")}: ${e.message}`)
+          .join("\n")}`
+      }
+    }
+
+    super(message, {
+      code: RegistryErrorCode.PARSE_ERROR,
+      cause: parseError,
+      context: { parseError },
+      suggestion:
+        "The registries index may be corrupted or have invalid registry namespace format. Registry names must start with @ (e.g., @shadcn, @example).",
+    })
+
+    this.parseError = parseError
+    this.name = "RegistriesIndexParseError"
+  }
+}
+
+export class InvalidConfigIconLibraryError extends RegistryError {
+  constructor(
+    public readonly iconLibrary: string,
+    public readonly validOptions: string[]
+  ) {
+    const message = `Invalid icon library "${iconLibrary}". Valid options are: ${validOptions.join(
+      ", "
+    )}`
+
+    super(message, {
+      code: RegistryErrorCode.INVALID_CONFIG,
+      context: { iconLibrary, validOptions },
+      suggestion: `Update the "iconLibrary" field in your components.json to one of: ${validOptions.join(
+        ", "
+      )}`,
+    })
+    this.name = "InvalidConfigIconLibraryError"
   }
 }

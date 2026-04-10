@@ -1,13 +1,18 @@
 import path from "path"
 import { buildUrlAndHeadersForRegistryItem } from "@/src/registry/builder"
 import { configWithDefaults } from "@/src/registry/config"
-import { BASE_COLORS, BUILTIN_REGISTRIES } from "@/src/registry/constants"
+import {
+  BASE_COLORS,
+  BUILTIN_REGISTRIES,
+  REGISTRY_URL,
+} from "@/src/registry/constants"
 import {
   clearRegistryContext,
   setRegistryHeaders,
 } from "@/src/registry/context"
 import {
   ConfigParseError,
+  RegistriesIndexParseError,
   RegistryInvalidNamespaceError,
   RegistryNotFoundError,
   RegistryParseError,
@@ -19,8 +24,10 @@ import {
 } from "@/src/registry/resolver"
 import { isUrl } from "@/src/registry/utils"
 import {
+  configJsonSchema,
   iconsSchema,
-  rawConfigSchema,
+  registriesIndexSchema,
+  registriesSchema,
   registryBaseColorSchema,
   registryConfigSchema,
   registryIndexSchema,
@@ -270,5 +277,67 @@ export async function getItemTargetPath(
   return path.join(
     config.resolvedPaths[parent as keyof typeof config.resolvedPaths],
     type
+  )
+}
+
+// Fetch registries with new schema (array of objects with name, homepage, url, featured).
+export async function getRegistries(options?: { useCache?: boolean }) {
+  options = {
+    useCache: true,
+    ...options,
+  }
+
+  const url = `${REGISTRY_URL}/registries.json`
+  const [data] = await fetchRegistry([url], {
+    useCache: options.useCache,
+  })
+
+  try {
+    return registriesSchema.parse(data)
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new RegistriesIndexParseError(error)
+    }
+
+    throw error
+  }
+}
+
+/**
+ * @deprecated Use getRegistries() instead.
+ */
+export async function getRegistriesIndex(options?: { useCache?: boolean }) {
+  // Fetch new format and transform to old Record<string, string> for backward compatibility.
+  const registries = await getRegistries(options)
+  if (!registries) return null
+  return Object.fromEntries(registries.map((r) => [r.name, r.url])) as z.infer<
+    typeof registriesIndexSchema
+  >
+}
+
+export async function getPresets(options?: { useCache?: boolean }) {
+  options = {
+    useCache: true,
+    ...options,
+  }
+
+  const url = `${REGISTRY_URL}/config.json`
+  const [data] = await fetchRegistry([url], {
+    useCache: options.useCache,
+  })
+
+  const result = configJsonSchema.parse(data)
+  return result.presets
+}
+
+export async function getPreset(
+  name: string,
+  options?: { useCache?: boolean }
+) {
+  const presets = await getPresets(options)
+  return (
+    presets.find(
+      (preset) => preset.name.toLowerCase() === name.toLowerCase()
+    ) ?? null
   )
 }

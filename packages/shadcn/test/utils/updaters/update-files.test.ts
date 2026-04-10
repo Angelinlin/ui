@@ -436,7 +436,7 @@ describe("resolveFilePath", () => {
     expect(
       resolveFilePath(
         {
-          path: "hello-world/design-system/primitives/button.tsx",
+          path: "hello-world/create-system/primitives/button.tsx",
           type: "registry:ui",
         },
         {
@@ -453,6 +453,258 @@ describe("resolveFilePath", () => {
         }
       )
     ).toBe("/foo/bar/components/ui/button.tsx")
+  })
+})
+
+describe("resolveFilePath with custom path", () => {
+  test("should use custom file path for exact file target", () => {
+    expect(
+      resolveFilePath(
+        {
+          path: "hello-world/ui/button.tsx",
+          type: "registry:ui",
+        },
+        {
+          resolvedPaths: {
+            cwd: "/foo/bar",
+            components: "/foo/bar/components",
+            ui: "/foo/bar/components/ui",
+            lib: "/foo/bar/lib",
+            hooks: "/foo/bar/hooks",
+          },
+        },
+        {
+          isSrcDir: false,
+          path: "/foo/bar/custom/my-button.tsx",
+          fileIndex: 0,
+        }
+      )
+    ).toBe("/foo/bar/custom/my-button.tsx")
+  })
+
+  test("should use custom directory path and strip type prefix", () => {
+    expect(
+      resolveFilePath(
+        {
+          path: "hello-world/ui/button.tsx",
+          type: "registry:ui",
+        },
+        {
+          resolvedPaths: {
+            cwd: "/foo/bar",
+            components: "/foo/bar/components",
+            ui: "/foo/bar/components/ui",
+            lib: "/foo/bar/lib",
+            hooks: "/foo/bar/hooks",
+          },
+        },
+        {
+          isSrcDir: false,
+          path: "/foo/bar/custom",
+          fileIndex: 0,
+        }
+      )
+    ).toBe("/foo/bar/custom/button.tsx")
+  })
+
+  test("should strip nested paths when using custom directory", () => {
+    expect(
+      resolveFilePath(
+        {
+          path: "hello-world/components/nested/path/card.tsx",
+          type: "registry:component",
+        },
+        {
+          resolvedPaths: {
+            cwd: "/foo/bar",
+            components: "/foo/bar/components",
+            ui: "/foo/bar/components/ui",
+            lib: "/foo/bar/lib",
+            hooks: "/foo/bar/hooks",
+          },
+        },
+        {
+          isSrcDir: false,
+          path: "/foo/bar/custom",
+          fileIndex: 0,
+        }
+      )
+    ).toBe("/foo/bar/custom/card.tsx")
+  })
+
+  test("should handle lib files with custom directory", () => {
+    expect(
+      resolveFilePath(
+        {
+          path: "hello-world/lib/utils.ts",
+          type: "registry:lib",
+        },
+        {
+          resolvedPaths: {
+            cwd: "/foo/bar",
+            components: "/foo/bar/components",
+            ui: "/foo/bar/components/ui",
+            lib: "/foo/bar/lib",
+            hooks: "/foo/bar/hooks",
+          },
+        },
+        {
+          isSrcDir: false,
+          path: "/foo/bar/custom",
+          fileIndex: 0,
+        }
+      )
+    ).toBe("/foo/bar/custom/utils.ts")
+  })
+
+  test("should handle hooks with custom directory", () => {
+    expect(
+      resolveFilePath(
+        {
+          path: "hello-world/hooks/use-toast.ts",
+          type: "registry:hook",
+        },
+        {
+          resolvedPaths: {
+            cwd: "/foo/bar",
+            components: "/foo/bar/components",
+            ui: "/foo/bar/components/ui",
+            lib: "/foo/bar/lib",
+            hooks: "/foo/bar/hooks",
+          },
+        },
+        {
+          isSrcDir: false,
+          path: "/foo/bar/custom",
+          fileIndex: 0,
+        }
+      )
+    ).toBe("/foo/bar/custom/use-toast.ts")
+  })
+
+  test("should use custom file path with different extension", () => {
+    expect(
+      resolveFilePath(
+        {
+          path: "hello-world/ui/card.tsx",
+          type: "registry:ui",
+        },
+        {
+          resolvedPaths: {
+            cwd: "/foo/bar",
+            components: "/foo/bar/components",
+            ui: "/foo/bar/components/ui",
+            lib: "/foo/bar/lib",
+            hooks: "/foo/bar/hooks",
+          },
+        },
+        {
+          isSrcDir: false,
+          path: "/foo/bar/my-components/custom-card.jsx",
+          fileIndex: 0,
+        }
+      )
+    ).toBe("/foo/bar/my-components/custom-card.jsx")
+  })
+
+  test("should not use custom path when not provided", () => {
+    expect(
+      resolveFilePath(
+        {
+          path: "hello-world/ui/button.tsx",
+          type: "registry:ui",
+        },
+        {
+          resolvedPaths: {
+            cwd: "/foo/bar",
+            components: "/foo/bar/components",
+            ui: "/foo/bar/components/ui",
+            lib: "/foo/bar/lib",
+            hooks: "/foo/bar/hooks",
+          },
+        },
+        {
+          isSrcDir: false,
+        }
+      )
+    ).toBe("/foo/bar/components/ui/button.tsx")
+  })
+
+  test("should support any file extension for file paths", () => {
+    // Test with .json
+    expect(
+      resolveFilePath(
+        {
+          path: "hello-world/config.json",
+          type: "registry:file",
+          target: "~/config.json",
+        },
+        {
+          resolvedPaths: {
+            cwd: "/foo/bar",
+            components: "/foo/bar/components",
+            ui: "/foo/bar/components/ui",
+            lib: "/foo/bar/lib",
+            hooks: "/foo/bar/hooks",
+          },
+        },
+        {
+          isSrcDir: false,
+          path: "/foo/bar/custom/my-config.json",
+          fileIndex: 0,
+        }
+      )
+    ).toBe("/foo/bar/custom/my-config.json")
+
+    // Test with .css
+    expect(
+      resolveFilePath(
+        {
+          path: "hello-world/styles.css",
+          type: "registry:file",
+          target: "~/styles.css",
+        },
+        {
+          resolvedPaths: {
+            cwd: "/foo/bar",
+            components: "/foo/bar/components",
+            ui: "/foo/bar/components/ui",
+            lib: "/foo/bar/lib",
+            hooks: "/foo/bar/hooks",
+          },
+        },
+        {
+          isSrcDir: false,
+          path: "/foo/bar/custom/theme.css",
+          fileIndex: 0,
+        }
+      )
+    ).toBe("/foo/bar/custom/theme.css")
+
+    // Test with .md
+    expect(
+      resolveFilePath(
+        {
+          path: "hello-world/README.md",
+          type: "registry:file",
+          target: "~/README.md",
+        },
+        {
+          resolvedPaths: {
+            cwd: "/foo/bar",
+            components: "/foo/bar/components",
+            ui: "/foo/bar/components/ui",
+            lib: "/foo/bar/lib",
+            hooks: "/foo/bar/hooks",
+          },
+        },
+        {
+          isSrcDir: false,
+          path: "/foo/bar/docs/guide.md",
+          fileIndex: 0,
+        }
+      )
+    ).toBe("/foo/bar/docs/guide.md")
   })
 })
 
@@ -1159,6 +1411,225 @@ DATABASE_URL=postgres://localhost:5432/mydb`,
     } finally {
       await fsActual.rm(tempDir, { recursive: true }).catch(() => {})
     }
+  })
+
+  test("should place first file at custom file path", async () => {
+    const config = await getConfig(
+      path.resolve(__dirname, "../../fixtures/vite-with-tailwind")
+    )
+    expect(
+      await updateFiles(
+        [
+          {
+            path: "registry/default/ui/button.tsx",
+            type: "registry:ui",
+            content: `export function Button() {
+  return <button>Custom Button</button>
+}`,
+          },
+        ],
+        config,
+        {
+          overwrite: true,
+          silent: true,
+          path: "custom/my-button.tsx",
+        }
+      )
+    ).toMatchInlineSnapshot(`
+      {
+        "filesCreated": [
+          "custom/my-button.tsx",
+        ],
+        "filesSkipped": [],
+        "filesUpdated": [],
+      }
+    `)
+  })
+
+  test("should place all files in custom directory", async () => {
+    const config = await getConfig(
+      path.resolve(__dirname, "../../fixtures/vite-with-tailwind")
+    )
+    expect(
+      await updateFiles(
+        [
+          {
+            path: "registry/default/ui/button.tsx",
+            type: "registry:ui",
+            content: `export function Button() {
+  return <button>Button</button>
+}`,
+          },
+          {
+            path: "registry/default/ui/card.tsx",
+            type: "registry:ui",
+            content: `export function Card() {
+  return <div>Card</div>
+}`,
+          },
+        ],
+        config,
+        {
+          overwrite: true,
+          silent: true,
+          path: "custom/components",
+        }
+      )
+    ).toMatchInlineSnapshot(`
+      {
+        "filesCreated": [
+          "custom/components/button.tsx",
+          "custom/components/card.tsx",
+        ],
+        "filesSkipped": [],
+        "filesUpdated": [],
+      }
+    `)
+  })
+
+  test("should only apply file path to first file", async () => {
+    const config = await getConfig(
+      path.resolve(__dirname, "../../fixtures/vite-with-tailwind")
+    )
+    expect(
+      await updateFiles(
+        [
+          {
+            path: "registry/default/ui/button.tsx",
+            type: "registry:ui",
+            content: `export function Button() {
+  return <button>Button</button>
+}`,
+          },
+          {
+            path: "registry/default/lib/utils.ts",
+            type: "registry:lib",
+            content: `export function cn() {}`,
+          },
+        ],
+        config,
+        {
+          overwrite: true,
+          silent: true,
+          path: "custom/my-button.tsx",
+        }
+      )
+    ).toMatchInlineSnapshot(`
+      {
+        "filesCreated": [
+          "custom/my-button.tsx",
+        ],
+        "filesSkipped": [],
+        "filesUpdated": [
+          "src/lib/utils.ts",
+        ],
+      }
+    `)
+  })
+
+  test("should preserve 'use client' directive for universal item files (registry:file)", async () => {
+    const config = await getConfig(
+      path.resolve(__dirname, "../../fixtures/vite-with-tailwind")
+    )
+    const result = await updateFiles(
+      [
+        {
+          path: "custom-component.tsx",
+          type: "registry:file",
+          target: "~/custom-component.tsx",
+          content: `"use client"
+
+export function CustomComponent() {
+  return <div>Custom Component</div>
+}`,
+        },
+      ],
+      config,
+      {
+        overwrite: true,
+        silent: true,
+      }
+    )
+
+    // Verify that the file was created
+    expect(result.filesCreated).toContain("custom-component.tsx")
+
+    // Read the written file and check if 'use client' is preserved
+    const writtenContent = (fs.writeFile as any).mock.calls.find((call: any) =>
+      call[0].endsWith("custom-component.tsx")
+    )?.[1]
+
+    expect(writtenContent).toContain('"use client"')
+  })
+
+  test("should preserve 'use client' directive for universal item files (registry:item)", async () => {
+    const config = await getConfig(
+      path.resolve(__dirname, "../../fixtures/vite-with-tailwind")
+    )
+    const result = await updateFiles(
+      [
+        {
+          path: "universal-widget.tsx",
+          type: "registry:item",
+          target: "~/universal-widget.tsx",
+          content: `'use client'
+
+export function UniversalWidget() {
+  return <div>Universal Widget</div>
+}`,
+        },
+      ],
+      config,
+      {
+        overwrite: true,
+        silent: true,
+      }
+    )
+
+    // Verify that the file was created
+    expect(result.filesCreated).toContain("universal-widget.tsx")
+
+    // Read the written file and check if 'use client' is preserved
+    const writtenContent = (fs.writeFile as any).mock.calls.find((call: any) =>
+      call[0].endsWith("universal-widget.tsx")
+    )?.[1]
+
+    expect(writtenContent).toContain("'use client'")
+  })
+
+  test("should remove 'use client' directive for non-universal item files when rsc is false", async () => {
+    const config = await getConfig(
+      path.resolve(__dirname, "../../fixtures/vite-with-tailwind")
+    )
+    const result = await updateFiles(
+      [
+        {
+          path: "registry/default/ui/regular-component.tsx",
+          type: "registry:ui",
+          content: `"use client"
+
+export function RegularComponent() {
+  return <div>Regular Component</div>
+}`,
+        },
+      ],
+      config,
+      {
+        overwrite: true,
+        silent: true,
+      }
+    )
+
+    // Verify that the file was created (filesCreated contains relative paths)
+    expect(result.filesCreated.length).toBeGreaterThan(0)
+
+    // Read the written file and check if 'use client' was removed
+    const writtenContent = (fs.writeFile as any).mock.calls.find((call: any) =>
+      call[0].endsWith("regular-component.tsx")
+    )?.[1]
+
+    // The 'use client' should be removed by the RSC transformer
+    expect(writtenContent).not.toContain('"use client"')
   })
 })
 

@@ -1,6 +1,9 @@
+import { promises as fsPromises } from "fs"
 import path from "path"
+import { getShadcnRegistryIndex } from "@/src/registry/api"
+import { SHADCN_URL } from "@/src/registry/constants"
 import { rawConfigSchema } from "@/src/schema"
-import { FRAMEWORKS, Framework } from "@/src/utils/frameworks"
+import { Framework, FRAMEWORKS } from "@/src/utils/frameworks"
 import { Config, getConfig, resolveConfigPaths } from "@/src/utils/get-config"
 import { getPackageInfo } from "@/src/utils/get-package-info"
 import fg from "fast-glob"
@@ -18,6 +21,7 @@ export type ProjectInfo = {
   tailwindConfigFile: string | null
   tailwindCssFile: string | null
   tailwindVersion: TailwindVersion
+  frameworkVersion: string | null
   aliasPrefix: string | null
 }
 
@@ -35,7 +39,10 @@ const TS_CONFIG_SCHEMA = z.object({
   }),
 })
 
-export async function getProjectInfo(cwd: string): Promise<ProjectInfo | null> {
+export async function getProjectInfo(
+  cwd: string,
+  opts?: { configCssFile?: string }
+): Promise<ProjectInfo | null> {
   const [
     configFiles,
     isSrcDir,
@@ -57,7 +64,7 @@ export async function getProjectInfo(cwd: string): Promise<ProjectInfo | null> {
     fs.pathExists(path.resolve(cwd, "src")),
     isTypeScriptProject(cwd),
     getTailwindConfigFile(cwd),
-    getTailwindCssFile(cwd),
+    getTailwindCssFile(cwd, opts?.configCssFile),
     getTailwindVersion(cwd),
     getTsConfigAliasPrefix(cwd),
     getPackageInfo(cwd, false),
@@ -75,6 +82,7 @@ export async function getProjectInfo(cwd: string): Promise<ProjectInfo | null> {
     tailwindConfigFile,
     tailwindCssFile,
     tailwindVersion,
+    frameworkVersion: null,
     aliasPrefix,
   }
 
@@ -84,6 +92,10 @@ export async function getProjectInfo(cwd: string): Promise<ProjectInfo | null> {
       ? FRAMEWORKS["next-app"]
       : FRAMEWORKS["next-pages"]
     type.isRSC = isUsingAppDir
+    type.frameworkVersion = await getFrameworkVersion(
+      type.framework,
+      packageJson
+    )
     return type
   }
 
@@ -165,6 +177,42 @@ export async function getProjectInfo(cwd: string): Promise<ProjectInfo | null> {
   return type
 }
 
+export async function getFrameworkVersion(
+  framework: Framework,
+  packageJson: ReturnType<typeof getPackageInfo>
+) {
+  if (!packageJson) {
+    return null
+  }
+
+  // Only detect Next.js version for now.
+  if (!["next-app", "next-pages"].includes(framework.name)) {
+    return null
+  }
+
+  const version =
+    packageJson.dependencies?.next || packageJson.devDependencies?.next
+
+  if (!version) {
+    return null
+  }
+
+  // Extract full semver (major.minor.patch), handling ^, ~, etc.
+  const versionMatch = version.match(/^[\^~]?(\d+\.\d+\.\d+)/)
+  if (versionMatch) {
+    return versionMatch[1] // e.g., "16.0.0"
+  }
+
+  // For ranges like ">=15.0.0 <16.0.0", extract the first version.
+  const rangeMatch = version.match(/(\d+\.\d+\.\d+)/)
+  if (rangeMatch) {
+    return rangeMatch[1]
+  }
+
+  // For "latest", "canary", "rc", etc., return the tag as-is.
+  return version
+}
+
 export async function getTailwindVersion(
   cwd: string
 ): Promise<ProjectInfo["tailwindVersion"]> {
@@ -198,7 +246,15 @@ export async function getTailwindVersion(
   return "v4"
 }
 
-export async function getTailwindCssFile(cwd: string) {
+export async function getTailwindCssFile(cwd: string, configCssFile?: string) {
+  // If the existing config has a known CSS file, check it first.
+  if (configCssFile) {
+    const resolvedPath = path.resolve(cwd, configCssFile)
+    if (await fs.pathExists(resolvedPath)) {
+      return configCssFile
+    }
+  }
+
   const [files, tailwindVersion] = await Promise.all([
     fg.glob(["**/*.css", "**/*.scss"], {
       cwd,
@@ -367,4 +423,26 @@ export async function getProjectTailwindVersionFromConfig(config: {
   }
 
   return projectInfo.tailwindVersion
+}
+
+export async function getProjectComponents(cwd: string) {
+  const existingConfig = await getConfig(cwd)
+  if (!existingConfig) {
+    return []
+  }
+
+  const resolvedConfig = await resolveConfigPaths(cwd, existingConfig)
+  const uiDir = resolvedConfig.resolvedPaths.ui
+  if (!fs.existsSync(uiDir)) {
+    return []
+  }
+
+  const registryIndex = await getShadcnRegistryIndex()
+  const registryNames = new Set(registryIndex?.map((item) => item.name) ?? [])
+
+  const files = await fsPromises.readdir(uiDir)
+  return files
+    .filter((f) => /\.(tsx|jsx)$/.test(f))
+    .map((f) => path.basename(f, path.extname(f)))
+    .filter((name) => registryNames.has(name))
 }

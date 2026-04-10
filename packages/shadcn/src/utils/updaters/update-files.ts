@@ -1,4 +1,4 @@
-import { existsSync, promises as fs } from "fs"
+import { existsSync, promises as fs, statSync } from "fs"
 import { tmpdir } from "os"
 import path, { basename } from "path"
 import { getRegistryBaseColor } from "@/src/registry/api"
@@ -12,16 +12,22 @@ import {
   parseEnvContent,
 } from "@/src/utils/env-helpers"
 import { Config } from "@/src/utils/get-config"
-import { ProjectInfo, getProjectInfo } from "@/src/utils/get-project-info"
+import { getProjectInfo, ProjectInfo } from "@/src/utils/get-project-info"
 import { highlighter } from "@/src/utils/highlighter"
 import { logger } from "@/src/utils/logger"
 import { resolveImport } from "@/src/utils/resolve-import"
 import { spinner } from "@/src/utils/spinner"
 import { transform } from "@/src/utils/transformers"
+import { transformAsChild } from "@/src/utils/transformers/transform-aschild"
+import { transformCleanup } from "@/src/utils/transformers/transform-cleanup"
 import { transformCssVars } from "@/src/utils/transformers/transform-css-vars"
+import { transformFont } from "@/src/utils/transformers/transform-font"
 import { transformIcons } from "@/src/utils/transformers/transform-icons"
 import { transformImport } from "@/src/utils/transformers/transform-import"
+import { transformMenu } from "@/src/utils/transformers/transform-menu"
+import { transformNext } from "@/src/utils/transformers/transform-next"
 import { transformRsc } from "@/src/utils/transformers/transform-rsc"
+import { transformRtl } from "@/src/utils/transformers/transform-rtl"
 import { transformTwPrefixes } from "@/src/utils/transformers/transform-tw-prefix"
 import prompts from "prompts"
 import { Project, ScriptKind } from "ts-morph"
@@ -38,6 +44,8 @@ export async function updateFiles(
     rootSpinner?: ReturnType<typeof spinner>
     isRemote?: boolean
     isWorkspace?: boolean
+    path?: string
+    supportedFontMarkers?: string[]
   }
 ) {
   if (!files?.length) {
@@ -72,7 +80,8 @@ export async function updateFiles(
   let envVarsAdded: string[] = []
   let envFile: string | null = null
 
-  for (const file of files) {
+  for (let index = 0; index < files.length; index++) {
+    const file = files[index]
     if (!file.content) {
       continue
     }
@@ -84,6 +93,8 @@ export async function updateFiles(
         files.map((f) => f.path),
         file.path
       ),
+      path: options.path,
+      fileIndex: index,
     })
 
     if (!filePath) {
@@ -108,27 +119,59 @@ export async function updateFiles(
 
     const existingFile = existsSync(filePath)
 
+    // TODO: revisit this when we implement utils transform instead of override.
+    if (
+      file.type === "registry:lib" &&
+      basename(file.path) === "utils.ts" &&
+      projectInfo?.framework.name === "laravel" &&
+      existingFile
+    ) {
+      filesSkipped.push(path.relative(config.resolvedPaths.cwd, filePath))
+      continue
+    }
+
+    // Check if the path exists and is a directory - we can't write to directories.
+    if (existingFile && statSync(filePath).isDirectory()) {
+      throw new Error(
+        `Cannot write to ${filePath}: path exists and is a directory. Please provide a file path instead.`
+      )
+    }
+
     // Run our transformers.
     // Skip transformers for .env files to preserve exact content
-    const content = isEnvFile(filePath)
-      ? file.content
-      : await transform(
-          {
-            filename: file.path,
-            raw: file.content,
-            config,
-            baseColor,
-            transformJsx: !config.tsx,
-            isRemote: options.isRemote,
-          },
-          [
-            transformImport,
-            transformRsc,
-            transformCssVars,
-            transformTwPrefixes,
-            transformIcons,
-          ]
-        )
+    // Skip transformers for universal item files (registry:file and registry:item)
+    // to preserve their original content as they're meant to be framework-agnostic
+    const isUniversalItemFile =
+      file.type === "registry:file" || file.type === "registry:item"
+    const content =
+      isEnvFile(filePath) || isUniversalItemFile
+        ? file.content
+        : await transform(
+            {
+              filename: file.path,
+              raw: file.content,
+              config,
+              baseColor,
+              transformJsx: !config.tsx,
+              isRemote: options.isRemote,
+              supportedFontMarkers: options.supportedFontMarkers,
+            },
+            [
+              transformImport,
+              transformRsc,
+              transformCssVars,
+              transformTwPrefixes,
+              transformIcons,
+              transformMenu,
+              transformAsChild,
+              transformRtl,
+              ...(_isNext16Middleware(filePath, projectInfo, config)
+                ? [transformNext]
+                : []),
+              transformFont,
+              transformCleanup,
+            ]
+          )
 
     // Skip the file if it already exists and the content is the same.
     // Exception: Don't skip .env files as we merge content instead of replacing
@@ -175,6 +218,11 @@ export async function updateFiles(
       }
     }
 
+    // Rename middleware.ts to proxy.ts for Next.js 16+.
+    if (_isNext16Middleware(filePath, projectInfo, config)) {
+      filePath = filePath.replace(/middleware\.(ts|js)$/, "proxy.$1")
+    }
+
     // Create the target directory if it doesn't exist.
     if (!existsSync(targetDir)) {
       await fs.mkdir(targetDir, { recursive: true })
@@ -218,18 +266,17 @@ export async function updateFiles(
   // Let's update filesUpdated with the updated files.
   filesUpdated.push(...updatedFiles)
 
-  // If a file is in filesCreated and filesUpdated, we should remove it from filesUpdated.
-  filesUpdated = filesUpdated.filter((file) => !filesCreated.includes(file))
+  // Remove duplicates and filter out files already in filesCreated.
+  filesCreated = Array.from(new Set(filesCreated))
+  filesUpdated = Array.from(
+    new Set(filesUpdated.filter((file) => !filesCreated.includes(file)))
+  )
+  filesSkipped = Array.from(new Set(filesSkipped))
 
   const hasUpdatedFiles = filesCreated.length || filesUpdated.length
   if (!hasUpdatedFiles && !filesSkipped.length) {
     filesCreatedSpinner?.info("No files updated.")
   }
-
-  // Remove duplicates.
-  filesCreated = Array.from(new Set(filesCreated))
-  filesUpdated = Array.from(new Set(filesUpdated))
-  filesSkipped = Array.from(new Set(filesSkipped))
 
   if (filesCreated.length) {
     filesCreatedSpinner?.succeed(
@@ -265,7 +312,7 @@ export async function updateFiles(
   if (filesSkipped.length) {
     spinner(
       `Skipped ${filesSkipped.length} ${
-        filesUpdated.length === 1 ? "file" : "files"
+        filesSkipped.length === 1 ? "file" : "files"
       }: (files might be identical, use --overwrite to overwrite)`,
       {
         silent: options.silent,
@@ -289,10 +336,6 @@ export async function updateFiles(
     }
   }
 
-  if (!options.silent) {
-    logger.break()
-  }
-
   return {
     filesCreated,
     filesUpdated,
@@ -307,8 +350,32 @@ export function resolveFilePath(
     isSrcDir?: boolean
     commonRoot?: string
     framework?: ProjectInfo["framework"]["name"]
+    path?: string
+    fileIndex?: number
   }
 ) {
+  // Handle custom path if provided.
+  if (options.path) {
+    const resolvedPath = path.isAbsolute(options.path)
+      ? options.path
+      : path.join(config.resolvedPaths.cwd, options.path)
+
+    const isFilePath = /\.[^/\\]+$/.test(resolvedPath)
+
+    if (isFilePath) {
+      // We'll only use the custom path for the first file.
+      // This is for registry items with multiple files.
+      if (options.fileIndex === 0) {
+        return resolvedPath
+      }
+    } else {
+      // If the custom path is a directory,
+      // We'll place all files in the directory.
+      const fileName = path.basename(file.path)
+      return path.join(resolvedPath, fileName)
+    }
+  }
+
   if (file.target) {
     if (file.target.startsWith("~/")) {
       return path.join(config.resolvedPaths.cwd, file.target.replace("~/", ""))
@@ -672,11 +739,34 @@ export function toAliasedImport(
   // if noExt is empty (i.e. file was exactly at the root), we import the root
   let suffix = noExt === "" ? "" : `/${noExt}`
 
-  // Rremove /src from suffix.
+  // Remove /src from suffix.
   // Alias will handle this.
   suffix = suffix.replace("/src", "")
 
   // 6️⃣ Prepend the prefix from projectInfo (e.g. "@") if needed
   //    but usually config.aliases already include it.
   return `${aliasBase}${suffix}${keepExt}`
+}
+
+function _isNext16Middleware(
+  filePath: string,
+  projectInfo: ProjectInfo | null,
+  config: Config
+) {
+  const isRootMiddleware =
+    filePath === path.join(config.resolvedPaths.cwd, "middleware.ts") ||
+    filePath === path.join(config.resolvedPaths.cwd, "middleware.js")
+
+  const isNextJs =
+    projectInfo?.framework.name === "next-app" ||
+    projectInfo?.framework.name === "next-pages"
+
+  if (!isRootMiddleware || !isNextJs || !projectInfo?.frameworkVersion) {
+    return false
+  }
+
+  const majorVersion = parseInt(projectInfo.frameworkVersion.split(".")[0])
+  const isNext16Plus = !isNaN(majorVersion) && majorVersion >= 16
+
+  return isNext16Plus
 }
